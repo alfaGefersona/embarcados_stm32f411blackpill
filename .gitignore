@@ -14,9 +14,6 @@ Release/
 *.hex
 *.a
 
-# Claude Code session
-.claude/
-
 # macOS
 .DS_Store
 .osx.project
