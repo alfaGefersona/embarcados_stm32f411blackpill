@@ -1,0 +1,28 @@
+# Build output
+Debug/
+Release/
+
+# Artefatos de compilacao
+*.o
+*.d
+*.su
+*.cyclo
+*.map
+*.list
+*.elf
+*.bin
+*.hex
+*.a
+
+# Claude Code session
+.claude/
+
+# macOS
+.DS_Store
+.osx.project
+
+# STM32CubeIDE — configuracoes pessoais/maquina
+.settings/
+
+# Debug launch (contem paths absolutos da maquina)
+*.launch
