@@ -21,8 +21,11 @@ Release/
 .DS_Store
 .osx.project
 
-# STM32CubeIDE — configuracoes pessoais/maquina
-.settings/
+# STM32CubeIDE — gerados automaticamente ou especificos da maquina
+.settings/language.settings.xml
+.settings/org.eclipse.cdt.core.prefs
+.settings/org.eclipse.cdt.codan.core.prefs
+.settings/com.st.stm32cube.ide.mcu.sfrview.prefs
 
 # Debug launch (contem paths absolutos da maquina)
 *.launch
