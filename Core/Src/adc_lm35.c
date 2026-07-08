@@ -6,19 +6,19 @@
  * Pipeline:
  *   TIM2 TRGO (1kHz) -> ADC1_IN0 -> DMA2 Str0 Ch0 (circular, LM35_BATCH_SIZE amostras)
  *   -> HAL_ADC_ConvCpltCallback -> xTaskNotifyGiveFromISR
- *   -> adc_lm35_task acorda -> converte raw->°C -> atualiza g_temp_lm35
+ *   -> adc_lm35_task acorda -> converte raw->°C -> atualiza s_temp_lm35
  *
  * Sensor: LM35 em PA0
  *   Saida: 10mV/°C, VREF = 3.3V, ADC 12-bit
  *   Conversao: temp_C = raw * (330.0f / 4095.0f)
  *
- * Nota: STM32F4 nao possui HAL_ADCEx_Calibration_Start (diferente do G4).
  */
 
 #include "adc_lm35.h"
 #include "main.h"
 #include "cmsis_os.h"
 #include "tusb.h"
+#include "usb_cdc.h"
 
 /* Handles gerados pelo CubeMX em main.c */
 extern ADC_HandleTypeDef hadc1;
@@ -30,8 +30,11 @@ static uint16_t adc_buf[LM35_BATCH_SIZE];
 /* Handle da task para notificacao via IRQ */
 static TaskHandle_t adc_task_handle = NULL;
 
-/* Variavel compartilhada com modbus_task */
-volatile float g_temp_lm35 = 0.0f;
+static volatile float s_temp_lm35 = 0.0f;
+
+float adc_lm35_get_temp(void) {
+    return s_temp_lm35;
+}
 
 /* -------------------------------------------------------------------------
  * HAL_ADC_ConvCpltCallback
@@ -66,10 +69,8 @@ void adc_lm35_task(void *param)
 
     adc_task_handle = xTaskGetCurrentTaskHandle();
 
-    /* Aguarda USB conectar antes de iniciar */
-    while (!tud_cdc_connected()) {
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
+    /* Bloqueia ate CDC[0] conectar  */
+    xEventGroupWaitBits(usb_event_group, USB_EVT_CDC0_CONNECTED, pdFALSE, pdTRUE, portMAX_DELAY);
 
     /* Arma DMA circular — callback dispara apos LM35_BATCH_SIZE conversoes */
     HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_buf, LM35_BATCH_SIZE);
@@ -82,11 +83,12 @@ void adc_lm35_task(void *param)
     static const float IIR_ALPHA = 0.05f;
 
     while (1) {
-        /* Bloqueia ate DMA completar lote (10ms a 1kHz) */
+        /* Bloqueia ate DMA completar lote */
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        /* Media das amostras do lote */
+        /* Media das amostras */
         uint32_t soma = 0;
+
         for (int i = 0; i < LM35_BATCH_SIZE; i++) {
             soma += adc_buf[i];
         }
@@ -96,8 +98,6 @@ void adc_lm35_task(void *param)
         float nova = media_raw * (330.0f / 4095.0f);
 
         /* Inicializa sem blend na primeira amostra */
-        g_temp_lm35 = (g_temp_lm35 == 0.0f)
-                      ? nova
-                      : IIR_ALPHA * nova + (1.0f - IIR_ALPHA) * g_temp_lm35;
+        s_temp_lm35 = (s_temp_lm35 == 0.0f) ? nova : IIR_ALPHA * nova + (1.0f - IIR_ALPHA) * s_temp_lm35;
     }
 }

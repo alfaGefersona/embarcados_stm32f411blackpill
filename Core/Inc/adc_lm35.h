@@ -13,8 +13,9 @@
 /* Numero de amostras por lote DMA (10ms a 1kHz) */
 #define LM35_BATCH_SIZE   10
 
-/* Temperatura media do ultimo lote — escrita por adc_lm35_task, lida por modbus_task */
-extern volatile float g_temp_lm35;
+/* Retorna temperatura filtrada em °C.
+ * Thread-safe: leitura 32-bit alinhada é atômica em Cortex-M4. */
+float adc_lm35_get_temp(void);
 
 void adc_lm35_task(void *param);
 

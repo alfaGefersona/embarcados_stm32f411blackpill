@@ -24,11 +24,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Declarado em usb_cdc.c */
-extern QueueHandle_t cdc_console_rx_queue;
-
 /* Buffer de mensagens TX — gatekeeper drena sequencialmente */
 static MessageBufferHandle_t console_msg_buf;
+
+/* Fila RX — preenchida por cdc1_rx_handler, consumida por console_task */
+static QueueHandle_t cdc_console_rx_queue;
 
 #define CONSOLE_LINE_MAX   80
 #define CONSOLE_MSG_BUF_SZ 512
@@ -53,20 +53,21 @@ static void cdc_gatekeeper_task(void *param) {
     static char buf[256];
     size_t len;
 
-    /* Aguarda CDC[1] conectar */
-    while (!tud_cdc_n_connected(1)) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
     for (;;) {
+        /* Bloqueia ate CDC[1] conectar — sem polling */
+        xEventGroupWaitBits(usb_event_group, USB_EVT_CDC1_CONNECTED,
+                            pdFALSE, pdTRUE, portMAX_DELAY);
+
         len = xMessageBufferReceive(console_msg_buf, buf, sizeof(buf), portMAX_DELAY);
-        if (len > 0 && tud_cdc_n_connected(1)) {
+        if (len > 0) {
             /* Escreve no FIFO interno TinyUSB.
              * usb_device_task e o unico que chama flush — sem acesso concorrente.
              * Loop necessario: FIFO TX = 256 bytes; mensagens longas exigem
              * multiplas escritas intercaladas com flush do usb_device_task. */
             uint32_t sent = 0;
             while (sent < len) {
+                /* Aborta se CDC[1] desconectar durante escrita */
+                if (!(xEventGroupGetBits(usb_event_group) & USB_EVT_CDC1_CONNECTED)) break;
                 uint32_t n = tud_cdc_n_write(1, (uint8_t *)buf + sent, len - sent);
                 sent += n;
                 if (sent < len) {
@@ -84,8 +85,9 @@ static void cdc_gatekeeper_task(void *param) {
 
 static void cmd_temp(void) {
     char buf[48];
-    int32_t t_int  = (int32_t)g_temp_lm35;
-    int32_t t_frac = (int32_t)((g_temp_lm35 - (float)t_int) * 10.0f);
+    float   temp   = adc_lm35_get_temp();
+    int32_t t_int  = (int32_t)temp;
+    int32_t t_frac = (int32_t)((temp - (float)t_int) * 10.0f);
     snprintf(buf, sizeof(buf), "LM35: %ld.%ld C\r\n", t_int, t_frac);
     console_print(buf);
 }
@@ -168,12 +170,10 @@ static void console_task(void *param) {
     uint8_t idx = 0;
     uint8_t ch;
 
-    /* Aguarda CDC[1] conectar */
-    while (!tud_cdc_n_connected(1)) {
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
+    /* Bloqueia ate CDC[1] conectar */
+    xEventGroupWaitBits(usb_event_group, USB_EVT_CDC1_CONNECTED, pdFALSE, pdTRUE, portMAX_DELAY);
 
-    console_print("\r\n=== Console Hidro ===\r\nDigite 'help'\r\n> ");
+    console_print("\r\n=== Console Trabalho Embarcados ===\r\nDigite 'help'\r\n> ");
 
     for (;;) {
         /* Bloqueia ate chegar byte — CDC rx callback alimenta a fila */
@@ -204,11 +204,28 @@ static void console_task(void *param) {
 }
 
 /* -------------------------------------------------------------------------
- * console_cdc_init — criar filas, semaforo e tasks
+ * cdc1_rx_handler — chamado por usb_device_task via dispatch table
+ * Contexto: task (NÃO ISR). Lê CDC[1] e enfileira bytes para console_task.
+ * ------------------------------------------------------------------------- */
+static void cdc1_rx_handler(uint8_t itf) {
+    (void)itf;
+    while (tud_cdc_n_available(1)) {
+        uint8_t ch;
+        tud_cdc_n_read(1, &ch, 1);
+        xQueueSendToBack(cdc_console_rx_queue, &ch, 0);
+    }
+}
+
+/* -------------------------------------------------------------------------
+ * console_cdc_init — criar filas, registrar callback e tasks
  * ------------------------------------------------------------------------- */
 void console_cdc_init(void) {
     cdc_console_rx_queue = xQueueCreate(64, sizeof(uint8_t));
+    configASSERT(cdc_console_rx_queue != NULL);
     console_msg_buf      = xMessageBufferCreate(CONSOLE_MSG_BUF_SZ);
+    configASSERT(console_msg_buf != NULL);
+
+    usb_cdc_register_rx_handler(1, cdc1_rx_handler);
 
     xTaskCreate(cdc_gatekeeper_task, "cdc_gkpr", CONSOLE_GKPR_STACK, NULL, osPriorityNormal, NULL);
     xTaskCreate(console_task,        "console",  CONSOLE_TASK_STACK,  NULL, osPriorityNormal, NULL);

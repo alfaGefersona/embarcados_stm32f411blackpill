@@ -38,8 +38,6 @@
   #define BOARD_TUD_RHPORT     0
 
 
-#define CFG_TUSB_RHPORT0_MODE    (OPT_MODE_DEVICE | OPT_MODE_FULL_SPEED)
-
 //#define USB_HS_PHYC 1s
 
  // RHPort max operational speed can defined by board.mk
@@ -68,7 +66,6 @@
 
  // Enable Device stack
  #define CFG_TUD_ENABLED       1
- #define  TUD_OPT_RHPORT	   0
 
  // Default is max speed that hardware controller could support with on-chip PHY
  #define CFG_TUD_MAX_SPEED     BOARD_TUD_MAX_SPEED

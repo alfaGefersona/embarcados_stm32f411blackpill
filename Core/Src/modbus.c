@@ -1,7 +1,7 @@
 /*
  * modbus.c
  *
- *  Envia TT-101 (leitura real do LM35 via ADC) como mestre Modbus FC16.
+ *  Envia TT-101 (leitura do LM35 via ADC) como mestre Modbus FC16.
  *  Frame: slave=0x01, FC=0x10, addr=0x0000, qty=2 regs, 4 bytes (float32 BE).
  */
 
@@ -32,35 +32,30 @@ void modbus_task(void *param) {
     uint8_t  i;
 
     while (1) {
-        if (tud_cdc_connected()) {
-            float    temp = g_temp_lm35;
-            uint32_t raw;
-            memcpy(&raw, &temp, 4);
+        /* Bloqueia ate CDC[0] conectar  */
+        xEventGroupWaitBits(usb_event_group, USB_EVT_CDC0_CONNECTED, pdFALSE, pdTRUE, portMAX_DELAY);
 
-            /* FC16: addr=0, qty=2, byte_count=4, dados big-endian */
-            i = 0;
-            frame[i++] = MODBUS_SLAVE_ID;
-            frame[i++] = MODBUS_FC16;
-            frame[i++] = 0x00; frame[i++] = 0x00;               /* start addr = 0 */
-            frame[i++] = 0x00; frame[i++] = MODBUS_TT101_REGS;  /* qty = 2        */
-            frame[i++] = MODBUS_TT101_REGS * 2;                  /* byte count = 4 */
-            frame[i++] = (raw >> 24) & 0xFF;
-            frame[i++] = (raw >> 16) & 0xFF;
-            frame[i++] = (raw >>  8) & 0xFF;
-            frame[i++] =  raw        & 0xFF;
-            crc = modbus_crc16(frame, i);
-            frame[i++] = crc & 0xFF;
-            frame[i++] = (crc >> 8) & 0xFF;
-            /* i == 13 bytes — non-blocking: cabe no FIFO TX (256B), USB drena em background */
-            tud_cdc_n_write(0, frame, i);
-            tud_cdc_n_write_flush(0);
-        }
+        float    temp = adc_lm35_get_temp();
+        uint32_t raw;
+        memcpy(&raw, &temp, 4);
 
+        /* FC16: addr=0, qty=2, byte_count=4, dados big-endian */
+        i = 0;
+        frame[i++] = MODBUS_SLAVE_ID;
+        frame[i++] = MODBUS_FC16;
+        frame[i++] = 0x00; frame[i++] = 0x00;               /* start addr = 0 */
+        frame[i++] = 0x00; frame[i++] = MODBUS_TT101_REGS;  /* qty = 2        */
+        frame[i++] = MODBUS_TT101_REGS * 2;                  /* byte count = 4 */
+        frame[i++] = (raw >> 24) & 0xFF;
+        frame[i++] = (raw >> 16) & 0xFF;
+        frame[i++] = (raw >>  8) & 0xFF;
+        frame[i++] =  raw        & 0xFF;
+        crc = modbus_crc16(frame, i);
+        frame[i++] = crc & 0xFF;
+        frame[i++] = (crc >> 8) & 0xFF;
+        /* i == 13 bytes — non-blocking: cabe no FIFO TX (256B), USB drena em background */
+        tud_cdc_n_write(0, frame, i);
 
-
-        //osDelay(1000);
-        osDelay(100);    // 10 Hz
-        //osDelay(20);
-       // osDelay(10);     // 100 Hz
+        osDelay(500);
     }
 }
